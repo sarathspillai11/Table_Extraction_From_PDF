@@ -1,6 +1,7 @@
 import os
 import json
 import base64
+import traceback
 from openai import AzureOpenAI
 from typing import Dict, List, Any
 
@@ -32,8 +33,24 @@ class TableImageAnalyzer:
         Returns:
             Base64 encoded image string
         """
-        with open(image_path, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode('utf-8')
+        try:
+            with open(image_path, "rb") as image_file:
+                return base64.b64encode(image_file.read()).decode('utf-8')
+        except FileNotFoundError:
+            print(f"Error: Image file not found at path: {image_path}")
+            print("Full stacktrace:")
+            traceback.print_exc()
+            raise
+        except PermissionError:
+            print(f"Error: Permission denied when trying to read file: {image_path}")
+            print("Full stacktrace:")
+            traceback.print_exc()
+            raise
+        except Exception as e:
+            print(f"Error encoding image: {e}")
+            print("Full stacktrace:")
+            traceback.print_exc()
+            raise
     
     def analyze_table_image(self, image_path: str) -> Dict[str, Any]:
         """
@@ -127,9 +144,13 @@ class TableImageAnalyzer:
         except json.JSONDecodeError as e:
             print(f"Error parsing JSON response: {e}")
             print(f"Raw response: {content}")
+            print("Full stacktrace:")
+            traceback.print_exc()
             return {"error": "Failed to parse JSON response", "raw_response": content}
         except Exception as e:
             print(f"Error analyzing image: {e}")
+            print("Full stacktrace:")
+            traceback.print_exc()
             return {"error": str(e)}
     
     def save_to_json(self, data: Dict[str, Any], output_path: str):
@@ -140,9 +161,25 @@ class TableImageAnalyzer:
             data: The analysis results dictionary
             output_path: Path where to save the JSON file
         """
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        print(f"Results saved to: {output_path}")
+        try:
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            print(f"Results saved to: {output_path}")
+        except PermissionError:
+            print(f"Error: Permission denied when trying to write to: {output_path}")
+            print("Full stacktrace:")
+            traceback.print_exc()
+            raise
+        except json.JSONEncodeError as e:
+            print(f"Error encoding data to JSON: {e}")
+            print("Full stacktrace:")
+            traceback.print_exc()
+            raise
+        except Exception as e:
+            print(f"Error saving JSON file: {e}")
+            print("Full stacktrace:")
+            traceback.print_exc()
+            raise
 
 def main():
     # Configuration - Replace with your Azure OpenAI details
@@ -160,50 +197,60 @@ def main():
     image_path = "table_image.png"  # Replace with your image path
     output_path = "table_analysis.json"
     
-    # Validate inputs
-    if not os.path.exists(image_path):
-        print(f"Error: Image file not found at {image_path}")
-        return
-    
-    if not AZURE_ENDPOINT or not API_KEY:
-        print("Error: Please configure your Azure OpenAI credentials")
-        return
-    
-    # Initialize analyzer
-    analyzer = TableImageAnalyzer(
-        azure_endpoint=AZURE_ENDPOINT,
-        api_key=API_KEY,
-        api_version=API_VERSION,
-        deployment_name=DEPLOYMENT_NAME
-    )
-    
-    # Analyze the image
-    print(f"Analyzing image: {image_path}")
-    results = analyzer.analyze_table_image(image_path)
-    
-    # Check for errors
-    if "error" in results:
-        print(f"Analysis failed: {results['error']}")
-        if "raw_response" in results:
-            print("Raw response from API:")
-            print(results["raw_response"])
-        return
-    
-    # Save results
-    analyzer.save_to_json(results, output_path)
-    
-    # Print summary
-    if "table_metadata" in results:
-        print(f"\nAnalysis Summary:")
-        print(f"Row headers: {len(results['table_metadata']['row_headers'])}")
-        print(f"Column headers: {len(results['table_metadata']['column_headers'])}")
-        print(f"Total cells analyzed: {len(results['cells'])}")
+    try:
+        # Validate inputs
+        if not os.path.exists(image_path):
+            print(f"Error: Image file not found at {image_path}")
+            return
         
-        # Print first few cells as examples
-        print(f"\nFirst 3 cells (example):")
-        for i, cell in enumerate(results['cells'][:3]):
-            print(f"  {i+1}. [{cell['row_header']}] x [{cell['column_header']}] = '{cell['cell_value']}'")
-            print(f"     Search question: {cell['search_question']}")
+        if not AZURE_ENDPOINT or not API_KEY:
+            print("Error: Please configure your Azure OpenAI credentials")
+            return
+        
+        # Initialize analyzer
+        print("Initializing Azure OpenAI analyzer...")
+        analyzer = TableImageAnalyzer(
+            azure_endpoint=AZURE_ENDPOINT,
+            api_key=API_KEY,
+            api_version=API_VERSION,
+            deployment_name=DEPLOYMENT_NAME
+        )
+        
+        # Analyze the image
+        print(f"Analyzing image: {image_path}")
+        results = analyzer.analyze_table_image(image_path)
+        
+        # Check for errors
+        if "error" in results:
+            print(f"Analysis failed: {results['error']}")
+            if "raw_response" in results:
+                print("Raw response from API:")
+                print(results["raw_response"])
+            return
+        
+        # Save results
+        print("Saving results to JSON file...")
+        analyzer.save_to_json(results, output_path)
+        
+        # Print summary
+        if "table_metadata" in results:
+            print(f"\nAnalysis Summary:")
+            print(f"Row headers: {len(results['table_metadata']['row_headers'])}")
+            print(f"Column headers: {len(results['table_metadata']['column_headers'])}")
+            print(f"Total cells analyzed: {len(results['cells'])}")
+            
+            # Print first few cells as examples
+            print(f"\nFirst 3 cells (example):")
+            for i, cell in enumerate(results['cells'][:3]):
+                print(f"  {i+1}. [{cell['row_header']}] x [{cell['column_header']}] = '{cell['cell_value']}'")
+                print(f"     Search question: {cell['search_question']}")
+    
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user")
+    except Exception as e:
+        print(f"Unexpected error in main function: {e}")
+        print("Full stacktrace:")
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
